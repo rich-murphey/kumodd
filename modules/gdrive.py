@@ -758,7 +758,7 @@ def get_query_from_filters():
     else:
         return None
 
-def walk_folders( ctx, folder, handle_item, path=None ):
+def walk_folders( ctx, folder, handle_item, path=None, cnt=0 ):
     if path is None:
         path = '.'
     query = f"'{folder['id']}' in parents"
@@ -792,9 +792,15 @@ def walk_folders( ctx, folder, handle_item, path=None ):
             break
         filename = folder['name'].replace( '/', '_' )
         for item in sorted(filter(is_file, file_list['files']), key=lambda i:i['name']):
-            handle_item( ctx, item, path )
+            if not cnt:
+                handle_item( ctx, item, '/' + filename )
+                continue
+            handle_item( ctx, item, path + '/' + filename )
         for item in sorted(filter(is_folder, file_list['files']), key=lambda i:i['name']):
-            walk_folders( ctx, item, handle_item, path + '/' + filename )
+            if not cnt:
+                walk_folders( ctx, item, handle_item, '/' + filename, cnt=cnt+1 )
+                continue
+            walk_folders( ctx, item, handle_item, path + '/' + filename, cnt=cnt+1 )
         if file_list.get('nextPageToken'):
             param['pageToken'] = file_list.get('nextPageToken')
         else:
@@ -818,7 +824,7 @@ def get_titles( config, metadata_names ):
 
 def get_gdrive_folder( ctx, path_in=None ):
     if path_in is None:
-        return ctx.files.get( fileId='root' ).execute(), '.'
+        return ctx.files.get( fileId='root' ).execute(), 'My Drive'
     file_id = 'root'
     path = 'My Drive'
     for folder_name in path_in.split('/'):
