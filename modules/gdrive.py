@@ -665,6 +665,7 @@ def download_file( ctx, drive_file, revision=None ):
     Returns:
       True if successful, else False.
     """
+    num_retries = 0
 
     file_path = local_data_dir( drive_file, ctx.user ) + '/' + file_name(drive_file, revision)
 
@@ -680,10 +681,14 @@ def download_file( ctx, drive_file, revision=None ):
             size, md5_of_data = download_file_and_do_md5(
                 ctx, drive_file, rev, file_path, acknowledgeAbuse=acknowledgeAbuse )
         except errors.HttpError as e:
+            if num_retries == 2:
+                logging.critical(f"Exception {e} while downloading {file_path}. Aborting.")
+                return
             if e.resp.status == 403:
                 errs = dget(json.loads(e.content), 'error.errors')
                 if errs is None:
                     print( f"Exception {e} while downloading {file_path}. Retrying...")
+                    num_retries += 1
                     continue
                 elif 'fileNotExportable' in [dget(err, 'reason') for err in errs]:
                     logging.critical( f"File not exportable: {file_path}")
@@ -697,8 +702,10 @@ def download_file( ctx, drive_file, revision=None ):
                     return
             else:
                 logging.critical( f"Exception {e} while downloading {file_path}. Retrying...", exc_info=True)
+                num_retries += 1
                 continue
         except Exception as e:
+            num_retries += 1
             logging.critical( f"Exception {e} while downloading {file_path}. Retrying...", exc_info=True)
             continue
         ctx.downloaded += 1
@@ -721,6 +728,7 @@ def download_file( ctx, drive_file, revision=None ):
             os.utime(file_path, (access_time, modify_time))
         except Exception as e:
             logging.critical( f"While setting file times, got exception: {e}", exc_info=True)
+            num_retries += 1
 
         if platform.system() == 'Windows':
             try:
@@ -735,6 +743,7 @@ def download_file( ctx, drive_file, revision=None ):
                 handle.close()
             except Exception as e:
                 logging.critical( f"While setting file times, got exception: {e}", exc_info=True)
+                num_retries += 1
             finally:
                 handle.close()
         return True
@@ -1094,7 +1103,7 @@ column_titles:
 
         elif FLAGS.download:
             ensure_dir(FLAGS.destination + '/' + ctx.user)
-            print( output_format.format( *[ dget(config, 'gdrive.column_titles').get(name) or name for name in metadata_names ]).rstrip())
+            print( output_format.format( *[ dget(config, 'column_titles').get(name) or name for name in metadata_names ]).rstrip())
             gdrive_folder, path = get_gdrive_folder( ctx, FLAGS.folder )
             with open(dget(config, 'gdrive.csv_prefix') + ctx.user + '.csv', 'w') as csv_handle:
                 writer = csv.writer(csv_handle, delimiter=',')
