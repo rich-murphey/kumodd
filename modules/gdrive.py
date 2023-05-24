@@ -242,24 +242,32 @@ def jsonpath_list( obj, object_path_list ):
 def supplement_drive_file_metadata(ctx, drive_file, path):
     drive_file['path'] = path
 
-    name = drive_file.get('originalFilename') or drive_file['name'].replace( '/', '_' )
+    name = drive_file.get('name') or drive_file['name'].replace( '/', '_' )
+    originalName = drive_file.get('originalFilename') or drive_file['name'].replace('/', '_')
+
     if drive_file['mimeType'].startswith('application/vnd.google'):
         extension = get_ext(drive_file, drive_file)
         if not drive_file.get('fileExtension') and extension:
             drive_file['fileExtension'] = extension
+        if not drive_file.get('name'):
+            drive_file['name'] = name
         if not drive_file.get('originalFilename'):
-            drive_file['originalFilename'] = name
+            drive_file['originalFilename'] = originalName
     else:
         if '.' in name:
             if not drive_file.get('fileExtension'):
                 drive_file['extension'] = name[name.rfind('.') + 1:]
+            if not drive_file.get('name'):
+                drive_file['name'] = name
             if not drive_file.get('originalFilename'):
-                drive_file['originalFilename'] = name
+                drive_file['originalFilename'] = originalName
         else:
             if not drive_file.get('fileExtension'):
                 drive_file['extension'] = ''
+            if not drive_file.get('name'):
+                drive_file['name'] = name
             if not drive_file.get('originalFilename'):
-                drive_file['originalFilename'] = name
+                drive_file['originalFilename'] = originalName
 
     drive_file['fullpath'] = drive_file['path'] + '/' + file_name(drive_file)
 
@@ -582,7 +590,7 @@ def local_data_dir( drive_file, username ):
     return '/'.join([ FLAGS.destination, username, drive_file['path'] ])
 
 def file_name( drive_file, revision=None ):
-    name = drive_file['originalFilename']
+    name = drive_file['name']
     if drive_file.get('fileExtension') and name.rfind('.' + drive_file['fileExtension']) > 0:
         name = name[0:name.rfind('.' + drive_file['fileExtension'])]
     if int(drive_file.get('version', 1)) > 1:
@@ -885,6 +893,7 @@ gdrive:
     - [fullpath, 50]
     normal:
     - [name, 20]
+    - [originalFilename, 20]
     - [category, 4]
     - [status, 7]
     - [md5Match, 7]
