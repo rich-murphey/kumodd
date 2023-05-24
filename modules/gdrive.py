@@ -863,12 +863,12 @@ def main(argv):
 
     if not os.path.exists(FLAGS.config):
         if FLAGS.config.find('/'):
-            ensure_dir(dirname(FLAGS.config[:FLAGS.config.rfind('/')]))
+            ensure_dir(dirname(FLAGS.config))
         # catch issues in the bundled config early by decoding and encoding
         yaml.dump(yaml.safe_load('''
 gdrive:
-  user_cred: google_drive_user_credentials.json
-  api_cred: google_api_credentials.json
+  user_cred: config/google_drive_user_credentials.json
+  api_cred: config/google_api_credentials.json
   csv_prefix: ./filelist-
   column_sets:
     short:
