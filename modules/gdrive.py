@@ -792,6 +792,10 @@ def walk_folders( ctx, folder, handle_item, path=None, cnt=0 ):
         'spaces': FLAGS.spaces,
         'pageSize': 1000,
     }
+
+    if "fullText contains" in param["q"]:
+        param.pop("orderBy")
+
     while True: # repeat for each page
         try:
             file_list = ctx.files.list(**param).execute()
