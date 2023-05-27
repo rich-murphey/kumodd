@@ -242,24 +242,32 @@ def jsonpath_list( obj, object_path_list ):
 def supplement_drive_file_metadata(ctx, drive_file, path):
     drive_file['path'] = path
 
-    name = drive_file.get('originalFilename') or drive_file['name'].replace( '/', '_' )
+    name = drive_file.get('name') or drive_file['name'].replace( '/', '_' )
+    originalName = drive_file.get('originalFilename') or drive_file['name'].replace('/', '_')
+
     if drive_file['mimeType'].startswith('application/vnd.google'):
         extension = get_ext(drive_file, drive_file)
         if not drive_file.get('fileExtension') and extension:
             drive_file['fileExtension'] = extension
+        if not drive_file.get('name'):
+            drive_file['name'] = name
         if not drive_file.get('originalFilename'):
-            drive_file['originalFilename'] = name
+            drive_file['originalFilename'] = originalName
     else:
         if '.' in name:
             if not drive_file.get('fileExtension'):
                 drive_file['extension'] = name[name.rfind('.') + 1:]
+            if not drive_file.get('name'):
+                drive_file['name'] = name
             if not drive_file.get('originalFilename'):
-                drive_file['originalFilename'] = name
+                drive_file['originalFilename'] = originalName
         else:
             if not drive_file.get('fileExtension'):
                 drive_file['extension'] = ''
+            if not drive_file.get('name'):
+                drive_file['name'] = name
             if not drive_file.get('originalFilename'):
-                drive_file['originalFilename'] = name
+                drive_file['originalFilename'] = originalName
 
     drive_file['fullpath'] = drive_file['path'] + '/' + file_name(drive_file)
 
@@ -582,7 +590,7 @@ def local_data_dir( drive_file, username ):
     return '/'.join([ FLAGS.destination, username, drive_file['path'] ])
 
 def file_name( drive_file, revision=None ):
-    name = drive_file['originalFilename']
+    name = drive_file['name']
     if drive_file.get('fileExtension') and name.rfind('.' + drive_file['fileExtension']) > 0:
         name = name[0:name.rfind('.' + drive_file['fileExtension'])]
     if int(drive_file.get('version', 1)) > 1:
@@ -657,6 +665,7 @@ def download_file( ctx, drive_file, revision=None ):
     Returns:
       True if successful, else False.
     """
+    num_retries = 0
 
     file_path = local_data_dir( drive_file, ctx.user ) + '/' + file_name(drive_file, revision)
 
@@ -672,10 +681,14 @@ def download_file( ctx, drive_file, revision=None ):
             size, md5_of_data = download_file_and_do_md5(
                 ctx, drive_file, rev, file_path, acknowledgeAbuse=acknowledgeAbuse )
         except errors.HttpError as e:
+            if num_retries == 2:
+                logging.critical(f"Exception {e} while downloading {file_path}. Aborting.")
+                return
             if e.resp.status == 403:
                 errs = dget(json.loads(e.content), 'error.errors')
                 if errs is None:
                     print( f"Exception {e} while downloading {file_path}. Retrying...")
+                    num_retries += 1
                     continue
                 elif 'fileNotExportable' in [dget(err, 'reason') for err in errs]:
                     logging.critical( f"File not exportable: {file_path}")
@@ -689,8 +702,10 @@ def download_file( ctx, drive_file, revision=None ):
                     return
             else:
                 logging.critical( f"Exception {e} while downloading {file_path}. Retrying...", exc_info=True)
+                num_retries += 1
                 continue
         except Exception as e:
+            num_retries += 1
             logging.critical( f"Exception {e} while downloading {file_path}. Retrying...", exc_info=True)
             continue
         ctx.downloaded += 1
@@ -713,6 +728,7 @@ def download_file( ctx, drive_file, revision=None ):
             os.utime(file_path, (access_time, modify_time))
         except Exception as e:
             logging.critical( f"While setting file times, got exception: {e}", exc_info=True)
+            num_retries += 1
 
         if platform.system() == 'Windows':
             try:
@@ -727,6 +743,7 @@ def download_file( ctx, drive_file, revision=None ):
                 handle.close()
             except Exception as e:
                 logging.critical( f"While setting file times, got exception: {e}", exc_info=True)
+                num_retries += 1
             finally:
                 handle.close()
         return True
@@ -750,7 +767,7 @@ def get_query_from_filters():
     else:
         return None
 
-def walk_folders( ctx, folder, handle_item, path=None ):
+def walk_folders( ctx, folder, handle_item, path=None, cnt=0 ):
     if path is None:
         path = '.'
     query = f"'{folder['id']}' in parents"
@@ -775,6 +792,10 @@ def walk_folders( ctx, folder, handle_item, path=None ):
         'spaces': FLAGS.spaces,
         'pageSize': 1000,
     }
+
+    if "fullText contains" in param["q"]:
+        param.pop("orderBy")
+
     while True: # repeat for each page
         try:
             file_list = ctx.files.list(**param).execute()
@@ -784,9 +805,15 @@ def walk_folders( ctx, folder, handle_item, path=None ):
             break
         filename = folder['name'].replace( '/', '_' )
         for item in sorted(filter(is_file, file_list['files']), key=lambda i:i['name']):
-            handle_item( ctx, item, path )
+            if not cnt:
+                handle_item( ctx, item, '/' + filename )
+                continue
+            handle_item( ctx, item, path + '/' + filename )
         for item in sorted(filter(is_folder, file_list['files']), key=lambda i:i['name']):
-            walk_folders( ctx, item, handle_item, path + '/' + filename )
+            if not cnt:
+                walk_folders( ctx, item, handle_item, '/' + filename, cnt=cnt+1 )
+                continue
+            walk_folders( ctx, item, handle_item, path + '/' + filename, cnt=cnt+1 )
         if file_list.get('nextPageToken'):
             param['pageToken'] = file_list.get('nextPageToken')
         else:
@@ -810,7 +837,7 @@ def get_titles( config, metadata_names ):
 
 def get_gdrive_folder( ctx, path_in=None ):
     if path_in is None:
-        return ctx.files.get( fileId='root' ).execute(), '.'
+        return ctx.files.get( fileId='root' ).execute(), 'My Drive'
     file_id = 'root'
     path = 'My Drive'
     for folder_name in path_in.split('/'):
@@ -849,12 +876,12 @@ def main(argv):
 
     if not os.path.exists(FLAGS.config):
         if FLAGS.config.find('/'):
-            ensure_dir(dirname(FLAGS.config[:FLAGS.config.rfind('/')]))
+            ensure_dir(dirname(FLAGS.config))
         # catch issues in the bundled config early by decoding and encoding
         yaml.dump(yaml.safe_load('''
 gdrive:
-  user_cred: google_drive_user_credentials.json
-  api_cred: google_api_credentials.json
+  user_cred: config/google_drive_user_credentials.json
+  api_cred: config/google_api_credentials.json
   csv_prefix: ./filelist-
   column_sets:
     short:
@@ -885,6 +912,7 @@ gdrive:
     - [fullpath, 50]
     normal:
     - [name, 20]
+    - [originalFilename, 20]
     - [category, 4]
     - [status, 7]
     - [md5Match, 7]
@@ -1079,7 +1107,7 @@ column_titles:
 
         elif FLAGS.download:
             ensure_dir(FLAGS.destination + '/' + ctx.user)
-            print( output_format.format( *[ dget(config, 'gdrive.column_titles').get(name) or name for name in metadata_names ]).rstrip())
+            print( output_format.format( *[ dget(config, 'column_titles').get(name) or name for name in metadata_names ]).rstrip())
             gdrive_folder, path = get_gdrive_folder( ctx, FLAGS.folder )
             with open(dget(config, 'gdrive.csv_prefix') + ctx.user + '.csv', 'w') as csv_handle:
                 writer = csv.writer(csv_handle, delimiter=',')
