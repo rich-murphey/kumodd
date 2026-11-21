@@ -37,6 +37,7 @@ gdrive:
     - [fullpath, 50]
     normal:
     - [name, 20]
+    - [originalFilename, 20]
     - [category, 4]
     - [status, 7]
     - [md5Match, 7]
